@@ -4,7 +4,7 @@ Differences ours - reference are rotated into radial (R), along-track (T), cross
 reference position and velocity. If the reference has no velocity (kinematic orbit), the velocity
 for the frame is taken from numerical differentiation of the reference positions (only orients the
 frame; a few cm of position noise over 10 s changes the axes by ~1e-6 rad).
-One PNG per day and reference; statistics are returned for the report.
+One PNG per reference over the whole date range (CHANGED); statistics per day are returned for the report.
 """
 from pathlib import Path
 
@@ -49,49 +49,54 @@ def plot_vs_reference(results_dir, methods, sat, days, ref_name, ref_loader, out
     lines = ["", f"=== orbit minus {ref_name} (cm) ===",
              f"{'day':10} {'opt':3} {'epochs':>6} {'R mean':>7} {'T mean':>7} {'N mean':>7} "
              f"{'R RMS':>7} {'T RMS':>7} {'N RMS':>7} {'3D RMS':>7}"]
-    for day in days:
+    full = {}                                                           # CHANGED: whole date range per option
+    for i, day in enumerate(days):                                      # CHANGED
         ref = ref_loader(day)
         if ref is None:
             lines.append(f"{day:10} reference not available")
             continue
-        data = {}
         for m in methods:
             h, e = errors_vs_reference(results_dir / m, sat, day, ref,
                                        own_loader(m, day) if own_loader else None)     # CHANGED
-            if len(h):
-                data[m] = (h, e)
-            else:
+            if not len(h):
                 lines.append(f"{day:10} {m:3} no common epochs with reference")
-        if not data:
-            continue
-        allv = np.concatenate([np.abs(e).ravel() for _, e in data.values()])
-        lim = max(np.percentile(allv, 99.9) * 1.1, 0.1)                # keep cm-level visible; outliers counted
-        fig, axes = plt.subplots(3, len(data), figsize=(4.2 * len(data), 7.5), sharex=True, sharey=True,
-                                 squeeze=False)
-        for c, (m, (h, e)) in enumerate(data.items()):
-            axes[0, c].set_title(f"{m}: {METHODS[m]}", color=INK, fontsize=10, loc="left")
-            for k, comp in enumerate(["Radial", "Along-track", "Cross-track"]):
-                ax = axes[k, c]
-                ax.plot(h, e[:, k], lw=0.8, color=COLORS[m])
-                rms = np.sqrt((e[:, k] ** 2).mean())
-                ax.text(0.02, 0.95, f"RMS {rms:.2f} cm", transform=ax.transAxes, va="top",
-                        fontsize=8, color=INK, bbox=dict(fc="white", ec="none", alpha=0.8))
-                ax.set_ylim(-lim, lim)
-                ax.grid(color=GRID, lw=0.8)
-                ax.tick_params(colors=MUTED, labelsize=8)
-                for s in ax.spines.values():
-                    s.set_color(GRID)
-                if c == 0:
-                    ax.set_ylabel(f"{comp} [cm]", color=INK)
-            axes[-1, c].set_xlabel("Hours of day (GPS time)", color=INK)
-        n_out = int((allv > lim).sum())
-        fig.suptitle(f"{title_sat} {day}: orbit minus {ref_name}"
-                     + (f"  ({n_out} values beyond axis)" if n_out else ""), color=INK, x=0.01, ha="left")
-        fig.tight_layout()
-        fig.savefig(out_dir / f"orbit_error_vs_{tag}_{day}.png", dpi=150)
-        plt.close(fig)
-        for m, (h, e) in data.items():
+                continue
+            full.setdefault(m, ([], []))                                # CHANGED
+            full[m][0].append(h + 24 * i)                               # CHANGED: hours since first day 00:00
+            full[m][1].append(e)                                        # CHANGED
             mean, rms = e.mean(0), np.sqrt((e**2).mean(0))
             lines.append(f"{day:10} {m:3} {len(h):6d} " + " ".join(f"{x:7.2f}" for x in mean) + " "
                          + " ".join(f"{x:7.2f}" for x in rms) + f" {np.sqrt((e**2).sum(1).mean()):7.2f}")
+    if not full:                                                        # CHANGED: one plot, all days
+        return lines
+    data = {m: (np.concatenate(h), np.concatenate(e)) for m, (h, e) in full.items()}
+    allv = np.concatenate([np.abs(e).ravel() for _, e in data.values()])
+    lim = max(np.percentile(allv, 99.9) * 1.1, 0.1)                    # keep cm-level visible; outliers counted
+    fig, axes = plt.subplots(3, len(data), figsize=(4.2 * len(data) + 2 * (len(days) - 1), 7.5),
+                             sharex=True, sharey=True, squeeze=False)
+    for c, (m, (h, e)) in enumerate(data.items()):
+        axes[0, c].set_title(f"{m}: {METHODS[m]}", color=INK, fontsize=10, loc="left")
+        for k, comp in enumerate(["Radial", "Along-track", "Cross-track"]):
+            ax = axes[k, c]
+            ax.plot(h, e[:, k], lw=0.6, color=COLORS[m])
+            for i in range(1, len(days)):                               # day boundaries
+                ax.axvline(24 * i, color=MUTED, lw=0.6, ls=":")
+            rms = np.sqrt((e[:, k] ** 2).mean())
+            ax.text(0.02, 0.95, f"RMS {rms:.2f} cm", transform=ax.transAxes, va="top",
+                    fontsize=8, color=INK, bbox=dict(fc="white", ec="none", alpha=0.8))
+            ax.set_ylim(-lim, lim)
+            ax.grid(color=GRID, lw=0.8)
+            ax.tick_params(colors=MUTED, labelsize=8)
+            for s in ax.spines.values():
+                s.set_color(GRID)
+            if c == 0:
+                ax.set_ylabel(f"{comp} [cm]", color=INK)
+        axes[-1, c].set_xlabel(f"Hours since {days[0]} 00:00 (GPS time)", color=INK)
+    n_out = int((allv > lim).sum())
+    span = days[0] if len(days) == 1 else f"{days[0]}_to_{days[-1]}"
+    fig.suptitle(f"{title_sat} {span.replace('_to_', ' to ')}: orbit minus {ref_name}"
+                 + (f"  ({n_out} values beyond axis)" if n_out else ""), color=INK, x=0.01, ha="left")
+    fig.tight_layout()
+    fig.savefig(out_dir / f"orbit_error_vs_{tag}_{span}.png", dpi=150)
+    plt.close(fig)
     return lines
