@@ -26,7 +26,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from core import download, gnss_products, plot_errors, run_groops, script_c, settings
-from core.groops_io import read_orbit, read_orbit_table
+from core.groops_io import arc_starts, read_orbit, read_orbit_table              # CHANGED: arc_starts
 
 NAME = "CHAMP"
 SATELLITE = "champ"
@@ -394,20 +394,27 @@ def _own_loader(results):                                              # CHANGED
     return load
 
 
+def _arc_loader(results):                                              # NEW
+    """Hours since START 00:00 where our output orbit starts a new arc (arcs as written by GROOPS)."""
+    return lambda m: (arc_starts(results / m / "output" / START / f"{SATELLITE}_orbit_{START}.txt")
+                      - TIME_START) * 24                                # NEW
+
+
 def validate(results, done, out, ctx, data_dir, exe):
     lines = []
     own = _own_loader(results)                                        # CHANGED
+    arcs = _arc_loader(results)                                       # NEW
     try:
         rdir = _rso_reference(results, ctx, data_dir, exe)
         rso = lambda day: read_orbit(rdir / "output" / day / f"{SATELLITE}_rso_{day}.txt")
         lines += plot_errors.plot_vs_reference(results, done, SATELLITE, DAYS,
-                                               "RSO (GFZ, a priori orbit of all options)", rso, out, NAME, own)   # CHANGED
+                                               "RSO (GFZ, a priori orbit of all options)", rso, out, NAME, own, arcs)   # CHANGED: arcs
     except SystemExit as e:                         # one failed reference does not stop the others
         lines += ["", f"=== vs RSO: SKIPPED ({e}) ==="]
     lines += plot_errors.plot_vs_reference(results, done, SATELLITE, DAYS,
                                            "TUG-kinematic (TU Graz published kinematic orbit)",
-                                           _tug_loader("kinematicOrbit"), out, NAME, own)              # CHANGED
+                                           _tug_loader("kinematicOrbit"), out, NAME, own, arcs)        # CHANGED: arcs
     lines += plot_errors.plot_vs_reference(results, done, SATELLITE, DAYS,
                                            "TUG-reduced-dynamic (TU Graz published reduced-dynamic orbit)",
-                                           _tug_loader("reducedDynamicOrbit"), out, NAME, own)         # CHANGED
+                                           _tug_loader("reducedDynamicOrbit"), out, NAME, own, arcs)   # CHANGED: arcs
     return lines

@@ -27,6 +27,19 @@ def read_instrument(path):
     return kind, np.vstack(arcs)                                        # CHANGED
 
 
+def arc_starts(path):                                                   # NEW: arc structure written by GROOPS
+    """Start times [MJD] of all arcs after the first one in a GROOPS text instrument file."""
+    with open(path) as f:
+        lines = f.readlines()
+    starts, i = [], 5                                                   # NEW: same layout as read_instrument
+    while i < len(lines) and lines[i].strip():                          # NEW
+        n = int(lines[i])                                               # NEW
+        if n:                                                           # NEW
+            starts.append(float(lines[i + 1].split()[0]))               # NEW: first epoch of this arc
+        i += 1 + n                                                      # NEW
+    return np.array(starts[1:])                                         # NEW
+
+
 def read_orbit(path):
     """Return t [MJD], pos [m] (N,3), vel [m/s] (N,3; zeros in kinematic orbits)."""
     kind, d = read_instrument(path)

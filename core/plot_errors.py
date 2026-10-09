@@ -40,9 +40,10 @@ def errors_vs_reference(run_dir, sat, day, ref, own=None):                      
 
 
 def plot_vs_reference(results_dir, methods, sat, days, ref_name, ref_loader, out_dir, title_sat,
-                      own_loader=None):                                                 # CHANGED
+                      own_loader=None, arc_loader=None):                                # CHANGED: arc_loader
     """ref_loader(day) -> (t [MJD], pos [m], vel [m/s] or None) or None if unavailable that day.
-    own_loader(method, day) -> our orbit (t, pos, vel) of that day (default: daily output files)."""
+    own_loader(method, day) -> our orbit (t, pos, vel) of that day (default: daily output files).
+    arc_loader(method) -> hours since first day 00:00 where GROOPS starts a new arc (red dashed lines)."""
     results_dir, out_dir = Path(results_dir), Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     tag = ref_name.split()[0].replace("/", "-")
@@ -75,12 +76,16 @@ def plot_vs_reference(results_dir, methods, sat, days, ref_name, ref_loader, out
     fig, axes = plt.subplots(3, len(data), figsize=(4.2 * len(data) + 2 * (len(days) - 1), 7.5),
                              sharex=True, sharey=True, squeeze=False)
     for c, (m, (h, e)) in enumerate(data.items()):
-        axes[0, c].set_title(f"{m}: {METHODS[m]}", color=INK, fontsize=10, loc="left")
+        arcs = arc_loader(m) if arc_loader else []                      # NEW: new-arc times [h]
+        axes[0, c].set_title(f"{m}: {METHODS[m]}" + (f"  (red dashed: new arc, {len(arcs)})" if len(arcs) else ""),
+                             color=INK, fontsize=10, loc="left")        # CHANGED: arc count in title
         for k, comp in enumerate(["Radial", "Along-track", "Cross-track"]):
             ax = axes[k, c]
             ax.plot(h, e[:, k], lw=0.6, color=COLORS[m])
             for i in range(1, len(days)):                               # day boundaries
                 ax.axvline(24 * i, color=MUTED, lw=0.6, ls=":")
+            for a in arcs:                                              # NEW: GROOPS arc starts
+                ax.axvline(a, color="red", lw=0.8, ls="--")             # NEW
             rms = np.sqrt((e[:, k] ** 2).mean())
             ax.text(0.02, 0.95, f"RMS {rms:.2f} cm", transform=ax.transAxes, va="top",
                     fontsize=8, color=INK, bbox=dict(fc="white", ec="none", alpha=0.8))
